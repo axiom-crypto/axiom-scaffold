@@ -8,28 +8,32 @@ use axiom_eth::{
     keccak::{FnSynthesize, KeccakChip},
     providers::{get_block_rlp, get_block_storage_input},
     rlp::{
-        builder::RlcThreadBuilder,
+        builder::{RlcThreadBreakPoints, RlcThreadBuilder},
         rlc::{RlcFixedTrace, RlcTrace},
         RlpChip,
     },
-    storage::{
-        EIP1186ResponseDigest, EthBlockAccountStorageTraceWitness, EthStorageChip,
-        EthStorageTraceWitness,
+    storage::{EIP1186ResponseDigest, EthBlockAccountStorageTraceWitness, EthStorageChip},
+    util::{
+        circuit::{PinnableCircuit, PreCircuit},
+        EthConfigPinning,
     },
     EthChip, EthCircuitBuilder, Field, Network,
 };
 use ethers_core::types::{Address, H256, U256};
 use ethers_providers::{Http, Middleware, Provider};
 use halo2_base::{
-    gates::{GateChip, RangeChip, RangeInstructions},
+    gates::{builder::CircuitBuilderStage, GateChip, RangeChip, RangeInstructions},
     halo2_proofs::{
         dev::MockProver,
         halo2curves::bn256::{Bn256, Fr, G1Affine},
         plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
-        poly::kzg::{
-            commitment::KZGCommitmentScheme,
-            multiopen::{ProverSHPLONK, VerifierSHPLONK},
-            strategy::SingleStrategy,
+        poly::{
+            commitment::Params,
+            kzg::{
+                commitment::{KZGCommitmentScheme, ParamsKZG},
+                multiopen::{ProverSHPLONK, VerifierSHPLONK},
+                strategy::SingleStrategy,
+            },
         },
         transcript::{
             Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
@@ -41,7 +45,8 @@ use halo2_base::{
 use rand_core::OsRng;
 use std::{
     cell::{RefCell, RefMut},
-    env::var,
+    env::{set_var, var},
+    marker::PhantomData,
 };
 use tokio::runtime::Runtime;
 
@@ -183,14 +188,17 @@ impl<F: Field> AxiomChip<F> {
         digest
     }
 
-    fn create(self) -> EthCircuitBuilder<F, impl FnSynthesize<F>> {
+    fn create(
+        self,
+        break_points: Option<RlcThreadBreakPoints>,
+    ) -> EthCircuitBuilder<F, impl FnSynthesize<F>> {
         let prover = self.builder.borrow().witness_gen_only();
         let circuit = EthCircuitBuilder::new(
             self.instances,
             self.builder.take(),
             self.keccak,
             self.range,
-            None,
+            break_points,
             move |builder: &mut RlcThreadBuilder<F>,
                   rlp: RlpChip<F>,
                   keccak_rlcs: KeccakRlcs<F>| {
@@ -222,7 +230,7 @@ impl AxiomChip<Fr> {
     /// This requires an environment variable `DEGREE` to be set, which limits the number of rows of the circuit to 2<sup>DEGREE</sup>.
     pub fn mock(self) {
         assert!(!self.builder.borrow().witness_gen_only());
-        let circuit = self.create();
+        let circuit = self.create(None);
         let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
         let time = start_timer!(|| "Mock prover");
         MockProver::run(k, &circuit, vec![circuit.instance()]).unwrap().assert_satisfied();
@@ -237,7 +245,7 @@ impl AxiomChip<Fr> {
     /// Warning: This may be memory and compute intensive.
     pub fn prove(self) {
         assert!(!self.builder.borrow().witness_gen_only());
-        let circuit = self.create();
+        let circuit = self.create(None);
         let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
         let minimum_rows =
             var("UNUSABLE_ROWS").unwrap_or_else(|_| "109".to_string()).parse().unwrap();
@@ -282,5 +290,33 @@ impl AxiomChip<Fr> {
         end_timer!(verify_time);
 
         println!("Congratulations! Your ZK proof is valid!");
+    }
+}
+
+pub struct AxiomFunction<F, FN>(FN, PhantomData<F>)
+where
+    F: Field,
+    FN: FnOnce(&mut AxiomChip<F>);
+
+impl<FN> PreCircuit for AxiomFunction<Fr, FN>
+where
+    FN: FnOnce(&mut AxiomChip<Fr>),
+{
+    type Pinning = EthConfigPinning;
+
+    fn create_circuit(
+        self,
+        stage: CircuitBuilderStage,
+        break_points: Option<RlcThreadBreakPoints>,
+        params: &ParamsKZG<Bn256>,
+    ) -> impl PinnableCircuit<Fr> {
+        let builder = match stage {
+            CircuitBuilderStage::Prover => RlcThreadBuilder::new(true),
+            _ => RlcThreadBuilder::new(false),
+        };
+        let mut axiom = AxiomChip::new(builder);
+        (self.0)(&mut axiom);
+        set_var("DEGREE", params.k().to_string());
+        axiom.create(break_points)
     }
 }
