@@ -6,15 +6,19 @@ use axiom_eth::{
         MAINNET_BLOCK_HEADER_RLP_MAX_BYTES,
     },
     keccak::{FnSynthesize, KeccakChip},
-    providers::get_block_rlp,
+    providers::{get_block_rlp, get_block_storage_input},
     rlp::{
         builder::RlcThreadBuilder,
         rlc::{RlcFixedTrace, RlcTrace},
         RlpChip,
     },
+    storage::{
+        EIP1186ResponseDigest, EthBlockAccountStorageTraceWitness, EthStorageChip,
+        EthStorageTraceWitness,
+    },
     EthChip, EthCircuitBuilder, Field, Network,
 };
-use ethers_core::types::U256;
+use ethers_core::types::{Address, H256, U256};
 use ethers_providers::{Http, Middleware, Provider};
 use halo2_base::{
     gates::{GateChip, RangeChip, RangeInstructions},
@@ -38,7 +42,6 @@ use rand_core::OsRng;
 use std::{
     cell::{RefCell, RefMut},
     env::var,
-    rc::Rc,
 };
 use tokio::runtime::Runtime;
 
@@ -47,43 +50,51 @@ use super::containers::EthBlock;
 type KeccakRlcs<F> =
     (Vec<(RlcFixedTrace<F>, RlcFixedTrace<F>)>, Vec<(RlcTrace<F>, RlcFixedTrace<F>)>);
 
+const ACCOUNT_PROOF_MAX_DEPTH: usize = 10;
+const STORAGE_PROOF_MAX_DEPTH: usize = 10;
+
 #[derive(Debug)]
 pub struct AxiomChip<F: Field> {
-    pub range: Rc<RangeChip<F>>,
+    pub range: RangeChip<F>,
     pub keccak: RefCell<KeccakChip<F>>,
     pub builder: RefCell<RlcThreadBuilder<F>>,
 
-    instances: RefCell<Vec<AssignedValue<F>>>,
-    header_witness: RefCell<Vec<EthBlockHeaderTraceWitness<F>>>,
+    instances: Vec<AssignedValue<F>>,
+    header_witness: Vec<EthBlockHeaderTraceWitness<F>>,
+    storage_witness: Vec<EthBlockAccountStorageTraceWitness<F>>,
 }
 
 impl<F: Field> Default for AxiomChip<F> {
     fn default() -> Self {
-        Self {
-            range: Rc::new(RangeChip::default(8)),
-            keccak: RefCell::new(KeccakChip::default()),
-            builder: RefCell::new(RlcThreadBuilder::mock()),
-            instances: Default::default(),
-            header_witness: Default::default(),
-        }
+        Self::new(RlcThreadBuilder::mock())
     }
 }
 
 impl<F: Field> Clone for AxiomChip<F> {
     // deep clone
     fn clone(&self) -> Self {
-        let range = self.range.clone();
-        let keccak = RefCell::new(self.keccak.borrow().clone());
-        let builder = RefCell::new(self.builder.borrow().clone());
-        let instance = RefCell::new(self.instances.borrow().clone());
-        let header_witness = RefCell::new(self.header_witness.borrow().clone());
-        Self { range, keccak, builder, instances: instance, header_witness }
+        Self {
+            range: self.range.clone(),
+            keccak: RefCell::new(self.keccak.borrow().clone()),
+            builder: RefCell::new(self.builder.borrow().clone()),
+            instances: self.instances.clone(),
+            header_witness: self.header_witness.clone(),
+            storage_witness: self.storage_witness.clone(),
+        }
     }
 }
 
 impl<F: Field> AxiomChip<F> {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(builder: RlcThreadBuilder<F>) -> Self {
+        let lookup_bits = var("LOOKUP_BITS").map(|l| l.parse().unwrap_or(8)).unwrap_or(8);
+        Self {
+            range: RangeChip::default(lookup_bits),
+            keccak: RefCell::new(KeccakChip::default()),
+            builder: RefCell::new(builder),
+            instances: Default::default(),
+            header_witness: Default::default(),
+            storage_witness: Default::default(),
+        }
     }
 
     pub fn ctx(&self) -> RefMut<Context<F>> {
@@ -102,14 +113,14 @@ impl<F: Field> AxiomChip<F> {
         EthChip::new(RlpChip::new(&self.range, None), None)
     }
 
-    pub fn expose_public(&self, value: AssignedValue<F>) {
-        self.instances.borrow_mut().push(value);
+    pub fn expose_public(&mut self, value: AssignedValue<F>) {
+        self.instances.push(value);
     }
 
     /// Get block header from provider by number. The provider provides the chain ID. Currently Ethereum mainnet and Goerli are supported.
     /// Returns the parsed block header where each field is a variable-length bytestring.
     pub fn eth_getBlockByNumber(
-        &self,
+        &mut self,
         provider: &Provider<Http>,
         block_number: u64,
     ) -> EthBlock<F> {
@@ -135,16 +146,50 @@ impl<F: Field> AxiomChip<F> {
             network,
         );
         let block = (&witness).into();
-        self.header_witness.borrow_mut().push(witness);
+        self.header_witness.push(witness);
         block
     }
 
-    fn create_circuit(self) -> EthCircuitBuilder<F, impl FnSynthesize<F>> {
-        EthCircuitBuilder::new(
-            self.instances.take(),
+    pub fn eth_getProof(
+        &mut self,
+        provider: &Provider<Http>,
+        address: Address,
+        slots: Vec<H256>,
+        block_number: u64,
+    ) -> EIP1186ResponseDigest<F> {
+        let rt = Runtime::new().unwrap();
+        let chain_id = rt.block_on(provider.get_chainid()).unwrap();
+        let network = match chain_id {
+            U256([1, 0, 0, 0]) => Network::Mainnet,
+            U256([5, 0, 0, 0]) => Network::Goerli,
+            _ => panic!("Unsupported chain id"),
+        };
+        let input = get_block_storage_input(
+            provider,
+            block_number as u32,
+            address,
+            slots,
+            ACCOUNT_PROOF_MAX_DEPTH,
+            STORAGE_PROOF_MAX_DEPTH,
+        );
+        let input = input.assign(&mut self.ctx());
+        let (witness, digest) = self.eth_chip().parse_eip1186_proofs_from_block_phase0(
+            &mut self.builder.borrow_mut().gate_builder,
+            &mut self.keccak.borrow_mut(),
+            input,
+            network,
+        );
+        self.storage_witness.push(witness);
+        digest
+    }
+
+    fn create(self) -> EthCircuitBuilder<F, impl FnSynthesize<F>> {
+        let prover = self.builder.borrow().witness_gen_only();
+        let circuit = EthCircuitBuilder::new(
+            self.instances,
             self.builder.take(),
             self.keccak,
-            self.range.as_ref().clone(),
+            self.range,
             None,
             move |builder: &mut RlcThreadBuilder<F>,
                   rlp: RlpChip<F>,
@@ -152,11 +197,22 @@ impl<F: Field> AxiomChip<F> {
                 let eth_chip = EthChip::new(rlp, Some(keccak_rlcs));
                 let (ctx_gate, ctx_rlc) = builder.rlc_ctx_pair();
 
-                for witness in self.header_witness.take().into_iter() {
+                for witness in self.header_witness.into_iter() {
                     eth_chip.decompose_block_header_phase1((ctx_gate, ctx_rlc), witness);
                 }
+
+                for witness in self.storage_witness.into_iter() {
+                    eth_chip.parse_eip1186_proofs_from_block_phase1(builder, witness);
+                }
             },
-        )
+        );
+        if !prover {
+            let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
+            let minimum_rows =
+                var("UNUSABLE_ROWS").unwrap_or_else(|_| "109".to_string()).parse().unwrap();
+            circuit.config(k, Some(minimum_rows));
+        }
+        circuit
     }
 }
 
@@ -165,13 +221,11 @@ impl AxiomChip<Fr> {
     ///
     /// This requires an environment variable `DEGREE` to be set, which limits the number of rows of the circuit to 2<sup>DEGREE</sup>.
     pub fn mock(self) {
-        let circuit = self.create_circuit();
+        assert!(!self.builder.borrow().witness_gen_only());
+        let circuit = self.create();
         let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
-        let minimum_rows =
-            var("UNUSABLE_ROWS").unwrap_or_else(|_| "109".to_string()).parse().unwrap();
-        circuit.config(k, Some(minimum_rows));
         let time = start_timer!(|| "Mock prover");
-        MockProver::run(k as u32, &circuit, vec![circuit.instance()]).unwrap().assert_satisfied();
+        MockProver::run(k, &circuit, vec![circuit.instance()]).unwrap().assert_satisfied();
         end_timer!(time);
         println!("Mock prover passed!");
     }
@@ -182,7 +236,8 @@ impl AxiomChip<Fr> {
     ///
     /// Warning: This may be memory and compute intensive.
     pub fn prove(self) {
-        let circuit = self.create_circuit();
+        assert!(!self.builder.borrow().witness_gen_only());
+        let circuit = self.create();
         let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
         let minimum_rows =
             var("UNUSABLE_ROWS").unwrap_or_else(|_| "109".to_string()).parse().unwrap();

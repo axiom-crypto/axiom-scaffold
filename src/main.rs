@@ -20,7 +20,7 @@ fn main() {
     let provider = Provider::<Http>::try_from(format!("{provider_url}{infura_id}").as_str())
         .expect("could not instantiate HTTP Provider");
 
-    let axiom = AxiomChip::<Fr>::default();
+    let mut axiom = AxiomChip::<Fr>::default();
 
     let block = axiom.eth_getBlockByNumber(&provider, 16_000_000);
     // Debug display of a block header field:
