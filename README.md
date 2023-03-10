@@ -23,7 +23,7 @@ The default provider is Infura on Ethereum mainnet, and you can export your Infu
 by copying
 
 ```bash
-cp .env_example .env
+cp .env.local.example .env
 # fill in .env with your Infura project ID
 source .env
 ```

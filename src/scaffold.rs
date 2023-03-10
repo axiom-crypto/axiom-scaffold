@@ -13,27 +13,20 @@ use axiom_eth::{
         RlpChip,
     },
     storage::{EIP1186ResponseDigest, EthBlockAccountStorageTraceWitness, EthStorageChip},
-    util::{
-        circuit::{PinnableCircuit, PreCircuit},
-        EthConfigPinning,
-    },
     EthChip, EthCircuitBuilder, Field, Network,
 };
 use ethers_core::types::{Address, H256, U256};
 use ethers_providers::{Http, Middleware, Provider};
 use halo2_base::{
-    gates::{builder::CircuitBuilderStage, GateChip, RangeChip, RangeInstructions},
+    gates::{GateChip, RangeChip, RangeInstructions},
     halo2_proofs::{
         dev::MockProver,
         halo2curves::bn256::{Bn256, Fr, G1Affine},
         plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
-        poly::{
-            commitment::Params,
-            kzg::{
-                commitment::{KZGCommitmentScheme, ParamsKZG},
-                multiopen::{ProverSHPLONK, VerifierSHPLONK},
-                strategy::SingleStrategy,
-            },
+        poly::kzg::{
+            commitment::KZGCommitmentScheme,
+            multiopen::{ProverSHPLONK, VerifierSHPLONK},
+            strategy::SingleStrategy,
         },
         transcript::{
             Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
@@ -45,8 +38,7 @@ use halo2_base::{
 use rand_core::OsRng;
 use std::{
     cell::{RefCell, RefMut},
-    env::{set_var, var},
-    marker::PhantomData,
+    env::var,
 };
 use tokio::runtime::Runtime;
 
@@ -110,6 +102,10 @@ impl<F: Field> AxiomChip<F> {
         self.range.gate()
     }
 
+    pub fn range(&self) -> &RangeChip<F> {
+        &self.range
+    }
+
     pub fn rlp_chip(&self) -> RlpChip<F> {
         RlpChip::new(&self.range, None)
     }
@@ -127,7 +123,7 @@ impl<F: Field> AxiomChip<F> {
     pub fn eth_getBlockByNumber(
         &mut self,
         provider: &Provider<Http>,
-        block_number: u64,
+        block_number: u32,
     ) -> EthBlock<F> {
         let rt = Runtime::new().unwrap();
         let chain_id = rt.block_on(provider.get_chainid()).unwrap();
@@ -136,7 +132,7 @@ impl<F: Field> AxiomChip<F> {
             U256([5, 0, 0, 0]) => Network::Goerli,
             _ => panic!("Unsupported chain id"),
         };
-        let block = rt.block_on(provider.get_block(block_number)).unwrap().unwrap();
+        let block = rt.block_on(provider.get_block(block_number as u64)).unwrap().unwrap();
         let mut block_header = get_block_rlp(&block);
         let max_len = match network {
             Network::Mainnet => MAINNET_BLOCK_HEADER_RLP_MAX_BYTES,
@@ -160,7 +156,7 @@ impl<F: Field> AxiomChip<F> {
         provider: &Provider<Http>,
         address: Address,
         slots: Vec<H256>,
-        block_number: u64,
+        block_number: u32,
     ) -> EIP1186ResponseDigest<F> {
         let rt = Runtime::new().unwrap();
         let chain_id = rt.block_on(provider.get_chainid()).unwrap();
@@ -171,7 +167,7 @@ impl<F: Field> AxiomChip<F> {
         };
         let input = get_block_storage_input(
             provider,
-            block_number as u32,
+            block_number,
             address,
             slots,
             ACCOUNT_PROOF_MAX_DEPTH,
@@ -188,7 +184,7 @@ impl<F: Field> AxiomChip<F> {
         digest
     }
 
-    fn create(
+    pub fn create(
         self,
         break_points: Option<RlcThreadBreakPoints>,
     ) -> EthCircuitBuilder<F, impl FnSynthesize<F>> {
@@ -290,33 +286,5 @@ impl AxiomChip<Fr> {
         end_timer!(verify_time);
 
         println!("Congratulations! Your ZK proof is valid!");
-    }
-}
-
-pub struct AxiomFunction<F, FN>(FN, PhantomData<F>)
-where
-    F: Field,
-    FN: FnOnce(&mut AxiomChip<F>);
-
-impl<FN> PreCircuit for AxiomFunction<Fr, FN>
-where
-    FN: FnOnce(&mut AxiomChip<Fr>),
-{
-    type Pinning = EthConfigPinning;
-
-    fn create_circuit(
-        self,
-        stage: CircuitBuilderStage,
-        break_points: Option<RlcThreadBreakPoints>,
-        params: &ParamsKZG<Bn256>,
-    ) -> impl PinnableCircuit<Fr> {
-        let builder = match stage {
-            CircuitBuilderStage::Prover => RlcThreadBuilder::new(true),
-            _ => RlcThreadBuilder::new(false),
-        };
-        let mut axiom = AxiomChip::new(builder);
-        (self.0)(&mut axiom);
-        set_var("DEGREE", params.k().to_string());
-        axiom.create(break_points)
     }
 }
