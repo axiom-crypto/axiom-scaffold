@@ -15,13 +15,14 @@ axiom-eth = { git = "https://github.com/axiom-crypto/axiom-eth.git", branch = "a
 
 ethers-core = { version = "1.0.2" }
 ethers-providers = { version = "1.0.2" }
-tokio = { version = "1.23.0", default-features = false, features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.26", default-features = false, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 test-log = "0.2.11"
 
 [features]
 default = []
+production = ["axiom-eth/production"]
 
 [profile.dev]
 opt-level = 3
