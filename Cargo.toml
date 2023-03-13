@@ -10,8 +10,8 @@ ark-std = { version = "0.3.0", features = ["print-trace"] }
 rand_core = "0.6"
 
 # halo2
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib", branch = "axiom-dev-0301", default-features = false }
-axiom-eth = { git = "https://github.com/axiom-crypto/axiom-eth.git", branch = "axiom-dev-0301" }
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib", branch = "axiom-dev-0301", default-features = false, features = ["jemallocator"] }
+axiom-eth = { git = "https://github.com/axiom-crypto/axiom-eth.git", branch = "axiom-dev-0301", default-features = false, features = ["halo2-axiom", "aggregation", "evm", "clap"] }
 
 ethers-core = { version = "1.0.2" }
 ethers-providers = { version = "1.0.2" }
@@ -21,7 +21,8 @@ tokio = { version = "1.26", default-features = false, features = ["rt", "rt-mult
 test-log = "0.2.11"
 
 [features]
-default = []
+default = ["display"]
+display = ["axiom-eth/display"]
 production = ["axiom-eth/production"]
 
 [profile.dev]
