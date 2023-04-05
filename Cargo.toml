@@ -1,6 +1,6 @@
 [package]
 name = "axiom-scaffold"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -13,8 +13,8 @@ rand_core = "0.6"
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib", branch = "axiom-dev-0301", default-features = false, features = ["jemallocator"] }
 axiom-eth = { git = "https://github.com/axiom-crypto/axiom-eth.git", branch = "axiom-dev-0301", default-features = false, features = ["halo2-axiom", "aggregation", "evm", "clap"] }
 
-ethers-core = { version = "1.0.2" }
-ethers-providers = { version = "1.0.2" }
+ethers-core = { version = "2.0.2" }
+ethers-providers = { version = "2.0.2" }
 tokio = { version = "1.26", default-features = false, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]

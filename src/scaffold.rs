@@ -151,6 +151,7 @@ impl<F: Field> AxiomChip<F> {
         block
     }
 
+    /// Matches the `eth_getProof` JSON-RPC call. Note that this will return a result matching the JSON-RPC call, even if account or storage slot is empty.
     pub fn eth_getProof(
         &mut self,
         provider: &Provider<Http>,

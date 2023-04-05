@@ -58,6 +58,7 @@ pub struct EthBlock<F: Field> {
     pub mix_hash: ByteString<F>,
     pub nonce: ByteString<F>,
     pub basefee: ByteString<F>, // this will be 0 (or undefined) if before London
+    pub withdrawals_root: ByteString<F>, // this will be 0 (or undefined) if before Shapella
 
     pub block_hash: [AssignedValue<F>; 32],
 }
@@ -81,6 +82,7 @@ impl<'a, F: Field> From<&'a EthBlockHeaderTraceWitness<F>> for EthBlock<F> {
             mix_hash: value.get("mix_hash").into(),
             nonce: value.get("nonce").into(),
             basefee: value.get("basefee").into(),
+            withdrawals_root: value.get("withdrawals_root").into(),
             block_hash: value.block_hash.clone().try_into().unwrap(),
         }
     }
