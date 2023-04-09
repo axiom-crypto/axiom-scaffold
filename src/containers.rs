@@ -36,9 +36,9 @@ impl<F: ScalarField> ByteString<F> {
 /// The max bytes per bytestring field are, for reference:
 /// ```
 /// const MAINNET_HEADER_FIELDS_MAX_BYTES: [usize; _] =
-/// [32, 32, 20, 32, 32, 32, 256, 7, 4, 4, 4, 4, 32, 32, 8, 6];
+/// [32, 32, 20, 32, 32, 32, 256, 7, 4, 4, 4, 4, 32, 32, 8, 6, 32];
 /// const GOERLI_HEADER_FIELDS_MAX_BYTES: [usize; _] =
-/// [32, 32, 20, 32, 32, 32, 256, 7, 4, 4, 4, 4, 97, 32, 8, 6];
+/// [32, 32, 20, 32, 32, 32, 256, 7, 4, 4, 4, 4, 97, 32, 8, 6, 32];
 /// ```
 #[derive(Clone, Debug)]
 pub struct EthBlock<F: Field> {

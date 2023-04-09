@@ -47,8 +47,8 @@ use super::containers::EthBlock;
 type KeccakRlcs<F> =
     (Vec<(RlcFixedTrace<F>, RlcFixedTrace<F>)>, Vec<(RlcTrace<F>, RlcFixedTrace<F>)>);
 
-const ACCOUNT_PROOF_MAX_DEPTH: usize = 10;
-const STORAGE_PROOF_MAX_DEPTH: usize = 10;
+pub const ACCOUNT_PROOF_MAX_DEPTH: usize = 10;
+pub const STORAGE_PROOF_MAX_DEPTH: usize = 10;
 
 #[derive(Debug)]
 pub struct AxiomChip<F: Field> {
@@ -116,6 +116,18 @@ impl<F: Field> AxiomChip<F> {
 
     pub fn expose_public(&mut self, value: AssignedValue<F>) {
         self.instances.push(value);
+    }
+
+    pub fn instances(&self) -> &[AssignedValue<F>] {
+        &self.instances
+    }
+
+    pub fn header_witness(&self) -> &[EthBlockHeaderTraceWitness<F>] {
+        &self.header_witness
+    }
+
+    pub fn storage_witness(&self) -> &[EthBlockAccountStorageTraceWitness<F>] {
+        &self.storage_witness
     }
 
     /// Get block header from provider by number. The provider provides the chain ID. Currently Ethereum mainnet and Goerli are supported.
