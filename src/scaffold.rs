@@ -164,6 +164,8 @@ impl<F: Field> AxiomChip<F> {
     }
 
     /// Matches the `eth_getProof` JSON-RPC call. Note that this will return a result matching the JSON-RPC call, even if account or storage slot is empty.
+    ///
+    /// This function assigns `address`, `slots`, and `block_number` as *private* witnesses. You must separately constrain them or make them public as needed.
     pub fn eth_getProof(
         &mut self,
         provider: &Provider<Http>,
