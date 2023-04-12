@@ -225,6 +225,7 @@ impl<F: Field> AxiomChip<F> {
                 }
             },
         );
+        #[cfg(not(feature = "production"))]
         if !prover {
             let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
             let minimum_rows =
