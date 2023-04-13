@@ -47,8 +47,8 @@ use super::containers::EthBlock;
 type KeccakRlcs<F> =
     (Vec<(RlcFixedTrace<F>, RlcFixedTrace<F>)>, Vec<(RlcTrace<F>, RlcFixedTrace<F>)>);
 
-const ACCOUNT_PROOF_MAX_DEPTH: usize = 10;
-const STORAGE_PROOF_MAX_DEPTH: usize = 10;
+pub const ACCOUNT_PROOF_MAX_DEPTH: usize = 10;
+pub const STORAGE_PROOF_MAX_DEPTH: usize = 10;
 
 #[derive(Debug)]
 pub struct AxiomChip<F: Field> {
@@ -118,6 +118,18 @@ impl<F: Field> AxiomChip<F> {
         self.instances.push(value);
     }
 
+    pub fn instances(&self) -> &[AssignedValue<F>] {
+        &self.instances
+    }
+
+    pub fn header_witness(&self) -> &[EthBlockHeaderTraceWitness<F>] {
+        &self.header_witness
+    }
+
+    pub fn storage_witness(&self) -> &[EthBlockAccountStorageTraceWitness<F>] {
+        &self.storage_witness
+    }
+
     /// Get block header from provider by number. The provider provides the chain ID. Currently Ethereum mainnet and Goerli are supported.
     /// Returns the parsed block header where each field is a variable-length bytestring.
     pub fn eth_getBlockByNumber(
@@ -152,6 +164,8 @@ impl<F: Field> AxiomChip<F> {
     }
 
     /// Matches the `eth_getProof` JSON-RPC call. Note that this will return a result matching the JSON-RPC call, even if account or storage slot is empty.
+    ///
+    /// This function assigns `address`, `slots`, and `block_number` as *private* witnesses. You must separately constrain them or make them public as needed.
     pub fn eth_getProof(
         &mut self,
         provider: &Provider<Http>,
@@ -211,6 +225,7 @@ impl<F: Field> AxiomChip<F> {
                 }
             },
         );
+        #[cfg(not(feature = "production"))]
         if !prover {
             let k = var("DEGREE").unwrap_or_else(|_| "18".to_string()).parse().unwrap();
             let minimum_rows =
