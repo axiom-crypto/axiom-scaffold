@@ -11,7 +11,7 @@ rand_core = "0.6"
 
 # halo2
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib", tag = "v2023_04_06", default-features = false, features = ["jemallocator"] }
-axiom-eth = { git = "https://github.com/axiom-crypto/axiom-eth.git", branch = "axiom-dev-0406", default-features = false, features = ["halo2-axiom", "aggregation", "evm", "clap"] }
+axiom-eth = { git = "https://github.com/axiom-crypto/axiom-eth.git", tag = "v2023_04_12", default-features = false, features = ["halo2-axiom", "aggregation", "evm", "clap"] }
 
 ethers-core = { version = "2.0.2" }
 ethers-providers = { version = "2.0.2" }
